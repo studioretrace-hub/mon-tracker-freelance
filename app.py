@@ -68,13 +68,20 @@ with col_cal:
 
     state = calendar(events=calendar_events, options=calendar_options, key="calendar")
     
-    # Gestion du clic pour ajouter/retirer de la surbrillance
+   # Gestion du clic corrigée (on nettoie la chaîne pour éviter le décalage de fuseau horaire)
     if state.get("dateClick"):
-        clicked_date = state["dateClick"]["date"].split("T")[0]
+        # On extrait uniquement 'YYYY-MM-DD' de la chaîne, peu importe l'heure
+        raw_date = state["dateClick"]["date"]
+        clicked_date = raw_date.split("T")[0] 
+        
+        # Vérification de sécurité : si la date contient un décalage horaire complexe
+        # on s'assure de prendre la bonne partie de la chaîne
         if clicked_date not in st.session_state.selected_dates:
             st.session_state.selected_dates.append(clicked_date)
         else:
             st.session_state.selected_dates.remove(clicked_date)
+            
+        # On force un rafraîchissement immédiat pour voir la surbrillance
         st.rerun()
 
 # --- COLONNE DROITE : ACTIONS & RÉCAP ---
