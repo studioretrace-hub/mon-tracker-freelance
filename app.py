@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import calendar
+from streamlit_calendar import calendar
 import os
 
 # --- CONFIGURATION ---
@@ -11,127 +11,110 @@ def load_data():
     if os.path.exists(FILE_DB):
         try:
             df = pd.read_csv(FILE_DB)
-            # Conversion forcée en format date
             df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-            # Nettoyage des lignes corrompues
-            df = df.dropna(subset=['Date'])
-            return df
+            return df.dropna(subset=['Date'])
         except:
             return pd.DataFrame(columns=['Date', 'Client', 'Heures', 'Taux', 'Total'])
     return pd.DataFrame(columns=['Date', 'Client', 'Heures', 'Taux', 'Total'])
 
 def save_data(df):
-    # Sauvegarde propre au format YYYY-MM-DD
     df.to_csv(FILE_DB, index=False, date_format='%Y-%m-%d')
 
 # --- INTERFACE ---
-st.set_page_config(page_title="Freelance Tracker", layout="wide")
-st.title("📊 Mon Calendrier de Facturation")
+st.set_page_config(page_title="Freelance Calendar", layout="wide")
+st.title("📅 Mon Calendrier de Travail")
 
 data = load_data()
 
-# --- SIDEBAR : MODÈLES ET SAISIE ---
-with st.sidebar:
-    st.header("⚡ Saisie Rapide")
-    
-    # Gestion des modèles en mémoire
-    if 'modeles' not in st.session_state:
-        st.session_state.modeles = {"Standard (3h)": {"h": 3, "t": 30}}
-    
-    with st.expander("➕ Créer un nouveau modèle"):
-        m_name = st.text_input("Nom du modèle (ex: Journée pleine)")
-        m_h = st.number_input("Nombre d'heures", value=7.0, step=0.5)
-        m_t = st.number_input("Taux horaire (€)", value=30, step=5)
-        if st.button("Enregistrer ce modèle"):
-            if m_name:
-                st.session_state.modeles[m_name] = {"h": m_h, "t": m_t}
-                st.success(f"Modèle '{m_name}' ajouté !")
+# --- INITIALISATION SESSION ---
+if 'selected_dates' not in st.session_state:
+    st.session_state.selected_dates = []
+if 'modeles' not in st.session_state:
+    st.session_state.modeles = {"Standard (3h)": {"h": 3, "t": 30}, "Journée (7h)": {"h": 7, "t": 30}}
 
-    st.divider()
+# --- COLONNE GAUCHE : LE CALENDRIER ---
+col_cal, col_form = st.columns([2, 1])
+
+with col_cal:
+    st.markdown("### 1. Cliquez sur les jours travaillés")
     
-    # --- SÉLECTEUR DE JOURS MULTIPLES ---
-    st.subheader("📅 Cocher les jours")
-    today = datetime.now()
+    # Configuration du calendrier
+    calendar_options = {
+        "editable": True,
+        "selectable": True,
+        "headerToolbar": {"left": "today prev,next", "center": "title", "right": ""},
+    }
     
-    # Génération des jours du mois en cours
-    num_days = calendar.monthrange(today.year, today.month)[1]
-    jours_obj = [datetime(today.year, today.month, d) for d in range(1, num_days + 1)]
-    options_jours = [d.strftime('%d/%m/%Y') for d in jours_obj]
+    # On affiche les événements déjà enregistrés en bleu
+    calendar_events = []
+    for _, row in data.iterrows():
+        calendar_events.append({
+            "title": f"✅ {row['Client']}",
+            "start": row['Date'].strftime('%Y-%m-%d'),
+            "end": row['Date'].strftime('%Y-%m-%d'),
+            "color": "#3D5AFE"
+        })
+
+    state = calendar(events=calendar_events, options=calendar_options, key="calendar")
     
-    jours_selectionnes_str = st.multiselect(
-        "Sélectionnez un ou plusieurs jours :",
-        options=options_jours,
-        default=[today.strftime('%d/%m/%Y')]
-    )
-    
-    client_tag = st.text_input("Tag Client", value="Client A")
-    mod_choisi = st.selectbox("Choisir un modèle", list(st.session_state.modeles.keys()))
-    
-    if st.button("🚀 Ajouter à la facturation"):
-        if not jours_selectionnes_str:
-            st.error("Sélectionnez au moins un jour !")
+    # Capture du clic sur le calendrier
+    if state.get("dateClick"):
+        clicked_date = state["dateClick"]["date"].split("T")[0]
+        if clicked_date not in st.session_state.selected_dates:
+            st.session_state.selected_dates.append(clicked_date)
         else:
+            st.session_state.selected_dates.remove(clicked_date)
+
+# --- COLONNE DROITE : ACTIONS & RÉCAP ---
+with col_form:
+    st.markdown("### 2. Valider la sélection")
+    
+    if st.session_state.selected_dates:
+        st.write(f"**Jours sélectionnés ({len(st.session_state.selected_dates)}) :**")
+        st.caption(", ".join(st.session_state.selected_dates))
+        
+        client_tag = st.text_input("Client", value="Client A")
+        mod_choisi = st.selectbox("Modèle", list(st.session_state.modeles.keys()))
+        
+        if st.button("Enregistrer ces jours"):
             h = st.session_state.modeles[mod_choisi]["h"]
             t = st.session_state.modeles[mod_choisi]["t"]
             
             new_entries = []
-            for date_str in jours_selectionnes_str:
-                d_obj = datetime.strptime(date_str, '%d/%m/%Y')
+            for d_str in st.session_state.selected_dates:
                 new_entries.append({
-                    'Date': d_obj, 
-                    'Client': client_tag, 
-                    'Heures': h, 
-                    'Taux': t, 
+                    'Date': pd.to_datetime(d_str),
+                    'Client': client_tag,
+                    'Heures': h,
+                    'Taux': t,
                     'Total': h * t
                 })
             
-            new_df = pd.DataFrame(new_entries)
-            data = pd.concat([data, new_df], ignore_index=True)
+            data = pd.concat([data, pd.DataFrame(new_entries)], ignore_index=True)
             save_data(data)
-            st.success(f"Ajouté : {len(jours_selectionnes_str)} jour(s)")
+            st.session_state.selected_dates = [] # Reset
+            st.success("Enregistré !")
             st.rerun()
+            
+        if st.button("Vider la sélection"):
+            st.session_state.selected_dates = []
+            st.rerun()
+    else:
+        st.info("Cliquez sur des cases du calendrier à gauche pour commencer.")
 
-# --- DASHBOARD PRINCIPAL ---
+# --- SECTION BAS : TOTAL TEMPS RÉEL ---
+st.divider()
 if not data.empty:
-    # On s'assure que le mois est bien calculé pour le filtre
     data['Mois'] = data['Date'].dt.strftime('%Y-%m')
-
-    # Filtres de vue
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        liste_mois = sorted(data['Mois'].unique(), reverse=True)
-        mois_focus = st.selectbox("📅 Filtrer par mois", liste_mois)
-    with col_f2:
-        liste_clients = ["Tous"] + list(data['Client'].unique())
-        client_focus = st.selectbox("👤 Filtrer par client", liste_clients)
-
-    # Application des filtres
-    df_filtre = data[data['Mois'] == mois_focus]
-    if client_focus != "Tous":
-        df_filtre = df_filtre[df_filtre['Client'] == client_focus]
-
-    # Affichage des métriques financières
+    current_month = datetime.now().strftime('%Y-%m')
+    
+    df_mois = data[data['Mois'] == current_month]
+    
+    st.subheader(f"💰 Total {datetime.now().strftime('%B %Y')}")
     m1, m2, m3 = st.columns(3)
-    m1.metric("Total à facturer", f"{df_filtre['Total'].sum():,.2f} €".replace(',', ' '))
-    m2.metric("Heures cumulées", f"{df_filtre['Heures'].sum():.1f} h")
-    m3.metric("Jours travaillés", len(df_filtre))
-
-    st.divider()
+    m1.metric("Gains du mois", f"{df_mois['Total'].sum():.2f} €")
+    m2.metric("Heures travaillées", f"{df_mois['Heures'].sum():.1f} h")
+    m3.metric("Nombre de missions", len(df_mois))
     
-    # Affichage du tableau
-    st.subheader("Détail des prestations")
-    df_display = df_filtre.copy()
-    df_display['Date'] = df_display['Date'].dt.strftime('%d/%m/%Y')
-    st.dataframe(
-        df_display[['Date', 'Client', 'Heures', 'Taux', 'Total']].sort_values('Date', ascending=False), 
-        use_container_width=True
-    )
-    
-    # Bouton de nettoyage
-    with st.expander("⚙️ Options avancées"):
-        if st.button("🗑️ Vider tout l'historique"):
-            if os.path.exists(FILE_DB):
-                os.remove(FILE_DB)
-                st.rerun()
-else:
-    st.info("👋 Bienvenue ! Utilisez la barre latérale pour ajouter vos premières heures de travail.")
+    with st.expander("Voir le détail des lignes"):
+        st.table(data.sort_values('Date', ascending=False).head(10))
