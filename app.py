@@ -131,4 +131,6 @@ if not data.empty:
     with st.expander("⚙️ Gérer les données enregistrées"):
         st.dataframe(data.sort_values('Date', ascending=False), use_container_width=True)
         if st.button("🗑️ Vider TOUT l'historique"):
-            if os.path.exists(
+            if os.path.exists(FILE_DB):
+                os.remove(FILE_DB)
+                st.rerun()
